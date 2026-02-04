@@ -5,31 +5,29 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Madura Solution | Attendance</title>
 
-<script src="https://unpkg.com/html5-qrcode"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <style>
-*{box-sizing:border-box;font-family:'Segoe UI',sans-serif}
+*{box-sizing:border-box;font-family:Segoe UI,sans-serif}
 body{
-  margin:0;min-height:100vh;display:flex;justify-content:center;align-items:center;
+  margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
   background:linear-gradient(135deg,#141e30,#243b55)
 }
 .card{
-  width:430px;background:#fff;padding:30px;border-radius:18px;
-  box-shadow:0 20px 40px rgba(0,0,0,.35);text-align:center
+  width:420px;background:#fff;padding:25px;border-radius:16px;
+  box-shadow:0 15px 35px rgba(0,0,0,.35);text-align:center
 }
-.logo{width:120px}
 input,button{
   width:100%;padding:12px;margin-top:10px;border-radius:8px
 }
-button{border:none;color:#fff;cursor:pointer}
-.btn-in{background:#1976d2}
-.btn-out{background:#388e3c}
-.btn-mgr{background:#6a1b9a}
-.btn-excel{background:#2e7d32}
-.btn-late{background:#c62828}
+button{border:none;color:#fff;font-size:15px;cursor:pointer}
+.day{background:#1976d2}
+.night{background:#0d47a1}
+.out{background:#388e3c}
+.mgr{background:#6a1b9a}
+.excel{background:#2e7d32}
 .hide{display:none}
 .footer{margin-top:10px;font-size:12px;color:#777}
 </style>
@@ -37,173 +35,192 @@ button{border:none;color:#fff;cursor:pointer}
 
 <body>
 <div class="card">
-  <img src="logo.png" class="logo">
   <h2>Madura Solution</h2>
 
   <input id="eid" placeholder="Employee ID">
   <input id="ename" placeholder="Employee Name">
-  <input id="edate" readonly>
-  <input id="etime" readonly>
+  <input id="date" readonly>
+  <input id="time" readonly>
 
-  <button class="btn-in" onclick="checkIn()">Check In</button>
-  <button class="btn-out" onclick="checkOut()">Check Out</button>
+  <button class="day" onclick="checkIn('Day')">☀️ Day Check-In</button>
+  <button class="night" onclick="checkIn('Night')">🌙 Night Check-In</button>
+  <button class="out" onclick="checkOut()">Check-Out</button>
 
   <hr>
   <input id="mpass" type="password" placeholder="Manager Password">
-  <button class="btn-mgr" onclick="managerLogin()">Manager Login</button>
+  <button class="mgr" onclick="managerLogin()">Manager Login</button>
 
-  <div id="manager" class="hide">
-    <hr>
-    <button class="btn-excel" onclick="todayExcel()">Today Attendance</button>
-    <button class="btn-late" onclick="todayLateExcel()">Today Late Logins</button>
+  <div id="managerPanel" class="hide">
+    <button class="excel" onclick="exportExcel()">⬇️ Download Attendance Excel</button>
   </div>
 
   <div class="footer">© 2026 Madura Solution</div>
 </div>
 
 <script>
-const eid = document.getElementById("eid");
+/* ELEMENTS */
+const eid   = document.getElementById("eid");
 const ename = document.getElementById("ename");
-const edate = document.getElementById("edate");
-const etime = document.getElementById("etime");
+const dateF = document.getElementById("date");
+const timeF = document.getElementById("time");
 const mpass = document.getElementById("mpass");
-const manager = document.getElementById("manager");
+const managerPanel = document.getElementById("managerPanel");
 
 /* FIREBASE */
 firebase.initializeApp({
-  apiKey:"AIzaSyCcdyU3qzwiYabU9Qrgc3yX2j0iPxEcQUQ",
-  projectId:"cms-management-e28df"
+  apiKey: "AIzaSyCcdyU3qzwiYabU9Qrgc3yX2j0iPxEcQUQ",
+  projectId: "cms-management-e28df"
 });
 const db = firebase.firestore();
 
-/* DATE TIME */
-function tick(){
-  const n=new Date();
-  edate.value=n.toLocaleDateString();
-  etime.value=n.toLocaleTimeString();
-}
-setInterval(tick,1000);
+/* LIVE DATE & TIME */
+setInterval(()=>{
+  const n = new Date();
+  dateF.value = n.toLocaleDateString();
+  timeF.value = n.toLocaleTimeString();
+},1000);
 
-/* SHIFT LOGIC */
-function getShift(now){
-  const h = now.getHours();
-  if(h>=9 && h<18) return "Day Shift";
-  if(h>=21 || h<6) return "Night Shift";
-  return "General";
+/* DATE KEY */
+function getDateKey(d){
+  return d.toISOString().slice(0,10);
+}
+
+/* SHIFT VALIDATION (COMPANY RULES) */
+function isShiftAllowed(shift){
+  const h = new Date().getHours();
+
+  // Day Shift: 09:00 AM – 05:59 PM
+  if(shift === "Day" && (h < 9 || h >= 18)){
+    alert("❌ Wrong shift!\nDay shift allowed only from 9:00 AM to 6:00 PM");
+    return false;
+  }
+
+  // Night Shift: 09:00 PM – 05:59 AM
+  if(shift === "Night" && h >= 6 && h < 21){
+    alert("❌ Wrong shift!\nNight shift allowed only from 9:00 PM to 6:00 AM");
+    return false;
+  }
+
+  return true;
 }
 
 /* CHECK IN */
-function checkIn(){
-  if(!eid.value||!ename.value) return alert("Enter details");
-
-  const now=new Date();
-  const shift=getShift(now);
-  let late=false;
-
-  if(shift==="Day Shift"){
-    late = now.getHours()>9 || (now.getHours()==9 && now.getMinutes()>10);
-  }
-  if(shift==="Night Shift"){
-    late = now.getHours()>21 || (now.getHours()==21 && now.getMinutes()>10);
+function checkIn(shift){
+  if(!eid.value || !ename.value){
+    alert("Enter Employee ID & Name");
+    return;
   }
 
-  db.collection("attendance").add({
-    empId:eid.value,
-    empName:ename.value,
-    date:now.toLocaleDateString(),
-    shift:shift,
-    checkIn:now.toLocaleTimeString(),
-    checkOut:"",
-    workHours:"",
-    status:late?"Late":"Present"
-  }).then(()=>alert("Check-in successful"));
+  if(!isShiftAllowed(shift)) return;
+
+  const now = new Date();
+  let dateKey = getDateKey(now);
+
+  if(shift==="Night" && now.getHours()<6){
+    const d = new Date(now);
+    d.setDate(d.getDate()-1);
+    dateKey = getDateKey(d);
+  }
+
+  db.collection("attendance")
+    .where("empId","==",eid.value)
+    .where("dateKey","==",dateKey)
+    .get()
+    .then(snap=>{
+      if(!snap.empty){
+        alert("⚠️ Already checked in today");
+        return;
+      }
+
+      db.collection("attendance").add({
+        empId: eid.value,
+        empName: ename.value,
+        dateKey: dateKey,
+        shift: shift,
+        checkIn: now.getTime(),
+        checkOut: null
+      }).then(()=>{
+        alert("✅ Check-in successful");
+      });
+    });
 }
 
 /* CHECK OUT */
 function checkOut(){
-  const today=new Date().toLocaleDateString();
+  if(!eid.value){
+    alert("Enter Employee ID");
+    return;
+  }
+
+  const now = new Date();
+  let dateKey = getDateKey(now);
+
+  if(now.getHours()<6){
+    const d = new Date(now);
+    d.setDate(d.getDate()-1);
+    dateKey = getDateKey(d);
+  }
+
   db.collection("attendance")
-  .where("empId","==",eid.value)
-  .where("date","==",today)
-  .get().then(s=>{
-    if(s.empty) return alert("No check-in found");
-
-    s.forEach(d=>{
-      const x=d.data();
-      let inTime=new Date(today+" "+x.checkIn);
-      let out=new Date();
-
-      if(x.shift==="Night Shift" && out<inTime){
-        out.setDate(out.getDate()+1);
+    .where("empId","==",eid.value)
+    .where("dateKey","==",dateKey)
+    .get()
+    .then(snap=>{
+      if(snap.empty){
+        alert("❌ Not checked in today");
+        return;
       }
 
-      const hrs=((out-inTime)/36e5).toFixed(2);
+      snap.forEach(doc=>{
+        const data = doc.data();
+        if(data.checkOut){
+          alert("⚠️ Already checked out");
+          return;
+        }
 
-      db.collection("attendance").doc(d.id).update({
-        checkOut:out.toLocaleTimeString(),
-        workHours:hrs
-      });
-      alert("Check-out successful");
-    });
-  });
-}
-
-/* MANAGER */
-function managerLogin(){
-  if(mpass.value==="Ms@"){
-    manager.classList.remove("hide");
-  }else alert("Wrong password");
-}
-
-/* TODAY EXCEL ONLY */
-function todayExcel(){
-  const today=new Date().toLocaleDateString();
-  db.collection("attendance").where("date","==",today).get().then(s=>{
-    let a=[],i=1;
-    s.forEach(d=>{
-      const x=d.data();
-      a.push({
-        "S.No":i++,
-        "ID":x.empId,
-        "Name":x.empName,
-        "Shift":x.shift,
-        "Check In":x.checkIn,
-        "Check Out":x.checkOut,
-        "Hours":x.workHours,
-        "Status":x.status
-      });
-    });
-    exportXLS(a,"Today_Attendance.xlsx");
-  });
-}
-
-/* TODAY LATE */
-function todayLateExcel(){
-  const today=new Date().toLocaleDateString();
-  db.collection("attendance").where("date","==",today).get().then(s=>{
-    let a=[],i=1;
-    s.forEach(d=>{
-      const x=d.data();
-      if(x.status==="Late"){
-        a.push({
-          "S.No":i++,
-          "ID":x.empId,
-          "Name":x.empName,
-          "Shift":x.shift,
-          "Login Time":x.checkIn
+        db.collection("attendance").doc(doc.id).update({
+          checkOut: now.getTime()
+        }).then(()=>{
+          alert("✅ Check-out successful");
         });
-      }
+      });
     });
-    if(!a.length) return alert("No late logins today");
-    exportXLS(a,"Today_Late_Login.xlsx");
-  });
 }
 
-function exportXLS(data,file){
-  const ws=XLSX.utils.json_to_sheet(data);
-  const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,"Report");
-  XLSX.writeFile(wb,file);
+/* MANAGER LOGIN */
+function managerLogin(){
+  if(mpass.value === "Ms@2025"){
+    managerPanel.classList.remove("hide");
+    alert("✅ Manager access granted");
+  }else{
+    alert("❌ Wrong password");
+  }
+}
+
+/* EXPORT EXCEL */
+function exportExcel(){
+  db.collection("attendance").get().then(snapshot=>{
+    let data = [];
+    let i = 1;
+
+    snapshot.forEach(doc=>{
+      const x = doc.data();
+      data.push({
+        "S.No": i++,
+        "Employee ID": x.empId,
+        "Employee Name": x.empName,
+        "Date": x.dateKey,
+        "Shift": x.shift,
+        "Check In": new Date(x.checkIn).toLocaleString(),
+        "Check Out": x.checkOut ? new Date(x.checkOut).toLocaleString() : ""
+      });
+    });
+
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Attendance");
+    XLSX.writeFile(wb, "Attendance_Report.xlsx");
+  });
 }
 </script>
 </body>
